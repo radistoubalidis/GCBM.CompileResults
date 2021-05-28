@@ -3,7 +3,7 @@ SELECT
     fic.id AS flux_indicator_collection_id,
     fic.description AS indicator,
     CAST(fi.year AS INTEGER) AS year,
-    {classifiers},
+    {classifiers_select},
     fi.unfccc_land_class AS unfccc_land_class,
     fi.age_range AS age_range,
     CAST(ROUND(CAST(SUM(fi.flux_tc) AS NUMERIC), 6) AS REAL) AS flux_tc
@@ -16,6 +16,6 @@ GROUP BY
     fic.id,
     fic.description,
     fi.year,
-    {classifiers},
+    {classifiers_select},
     fi.unfccc_land_class,
     fi.age_range

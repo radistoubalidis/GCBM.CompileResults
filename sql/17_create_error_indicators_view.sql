@@ -1,7 +1,7 @@
 CREATE TABLE v_error_indicators AS
 SELECT
    	CAST(l.year AS INTEGER) AS year,
-  	{classifiers},
+  	{classifiers_select},
     e.module AS module,
     e.error AS error,
     CAST(SUM(l.area) AS REAL) AS area
@@ -12,6 +12,6 @@ LEFT JOIN r_location l
     ON le.locationdimid = l.locationdimid
 GROUP BY
    l.year,
-   {classifiers},
+   {classifiers_select},
    e.module,
    e.error;

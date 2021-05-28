@@ -1,6 +1,6 @@
 CREATE TABLE r_stand_area AS
 SELECT
-    {classifiers},
+    {classifiers_select},
     d.year AS year,
     lc.name AS land_class,
     a.startage AS age_class_start,
@@ -16,7 +16,7 @@ INNER JOIN landclassdimension lc
 INNER JOIN ageclassdimension a
     ON l.ageclassdimid = a.id
 GROUP BY
-    {classifiers},
+    {classifiers_select},
     d.year,
     lc.name,
     a.startage,
@@ -25,7 +25,7 @@ GROUP BY
 INSERT INTO r_location
 SELECT
     l.id AS locationdimid,
-    {select_classifiers},
+    {classifiers_select_a},
     a.year,
     a.land_class,
     CASE
@@ -44,7 +44,7 @@ INNER JOIN landclassdimension lc
 INNER JOIN ageclassdimension ac
     ON l.ageclassdimid = ac.id
 INNER JOIN r_stand_area a
-    ON {join_classifiers}
+    ON {classifiers_join_s_a}
     AND d.year = a.year
     AND lc.name = a.land_class
     AND ac.startage = a.age_class_start

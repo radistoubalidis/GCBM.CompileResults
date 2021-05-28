@@ -19,6 +19,7 @@ DROP TABLE IF EXISTS v_total_disturbed_areas{table_suffix} CASCADE;
 DROP TABLE IF EXISTS v_flux_indicators_density{table_suffix} CASCADE;
 DROP TABLE IF EXISTS v_flux_indicator_aggregates_density{table_suffix} CASCADE;
 DROP TABLE IF EXISTS v_stock_change_indicators_density{table_suffix} CASCADE;
+DROP TABLE IF EXISTS v_disturbance_fluxes{table_suffix} CASCADE;
 
 CREATE UNLOGGED TABLE r_change_type_categories{table_suffix} (
     id SERIAL PRIMARY KEY,

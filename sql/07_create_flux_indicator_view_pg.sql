@@ -1,7 +1,7 @@
 CREATE UNLOGGED TABLE v_flux_indicators{table_suffix} AS
 SELECT
     fi.id AS flux_indicator_id,
-    {classifiers},
+    {classifiers_select},
     l.land_class AS unfccc_land_class,
     fi.name AS indicator,
     CAST(l.year AS INTEGER) AS year,
@@ -36,7 +36,7 @@ LEFT JOIN disturbancetypedimension{table_suffix} dt
     ON di.disturbancetypedimid = dt.id
 GROUP BY
     fi.id,
-    {classifiers},
+    {classifiers_select},
     l.land_class,
     fi.name,
     dt.disturbancetype,

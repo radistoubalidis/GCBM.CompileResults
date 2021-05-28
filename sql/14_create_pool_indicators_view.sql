@@ -1,12 +1,11 @@
 CREATE TABLE v_pool_indicators AS
 SELECT
     pid.id AS indicator_id,
-    {classifiers},
+    {classifiers_select},
     l.land_class AS unfccc_land_class,
     pid.name AS indicator,
     CAST(l.year AS INTEGER) AS year,
     l.age_range AS age_range,
-    CAST(l.area AS REAL) AS area,
     CAST(SUM(p.poolvalue) AS REAL) AS pool_tc,
     CAST(SUM(p.poolvalue) / l.area AS REAL) AS pool_tc_per_ha
 FROM r_pool_indicators pid
@@ -22,6 +21,5 @@ GROUP BY
     pid.name,
     l.year,
     l.age_range,
-    l.area,
-    {classifiers},
+    {classifiers_select},
     l.land_class;
