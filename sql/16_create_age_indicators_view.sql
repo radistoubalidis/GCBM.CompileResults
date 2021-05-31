@@ -1,7 +1,7 @@
 CREATE TABLE v_age_indicators AS
 SELECT
    	CAST(l.year AS INTEGER) AS year,
-  	{classifiers},
+  	{classifiers_select},
     l.land_class AS unfccc_land_class,
     l.age_range AS age_range,
    	CAST(SUM(a.area) AS REAL) AS area
@@ -13,6 +13,6 @@ INNER JOIN r_location l
 WHERE l.year > 0
 GROUP BY
    l.year,
-   {classifiers},
+   {classifiers_select},
    l.land_class,
    l.age_range;

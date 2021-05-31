@@ -1,11 +1,8 @@
-# Python 2.7 compatibility.
-from future.standard_library import install_aliases
-install_aliases()
-
 import os
 import simplejson as json
 import logging
 import sys
+from string import Formatter
 from itertools import zip_longest
 from argparse import ArgumentParser
 from sqlalchemy import create_engine
@@ -24,36 +21,55 @@ def load_sql(name, db_type, classifiers, batch=None):
     of 00_setup.sql for Postgres databases), and adds the simulation classifier columns in one of
     several different formats for queries that need them.
     '''
-    logging.info("  {}".format(name))
+    logging.info(f"  {name}")
     sql_dir = os.path.join(os.path.dirname(__file__), "sql")
-    for filename in (os.path.join(sql_dir, "{}_{}.sql".format(name, db_type)),
-                     os.path.join(sql_dir, "{}.sql".format(name))):
+    for filename in (os.path.join(sql_dir, f"{name}_{db_type}.sql"),
+                     os.path.join(sql_dir, f"{name}.sql")):
         if os.path.exists(filename):
-            params = classifiers
-            params["table_suffix"] = "_{}".format(batch) if batch else ""
+            params = {"table_suffix": f"_{batch}" if batch else ""}
             queries = []
             for sql in open(filename, "r").read().split(";"):
                 if sql and not sql.isspace():
+                    sql_params = {key for _, key, _, _ in Formatter().parse(sql) if key}
+                    for param in sql_params:
+                        if "classifiers" not in param:
+                            continue
+                        
+                        # Query can contain format strings to be replaced by classifier names:
+                        # classifiers_select[_<table name>]
+                        # classifiers_join_<table1>_<table2>
+                        # classifiers_ddl
+                        parts = param.split("_")
+                        if "select" in parts:
+                            table = parts[2] if len(parts) >= 3 else None
+                            suffix = parts[3] if len(parts) == 4 else None
+                            params[param] = ", ".join(
+                                (f"{table}.{c} AS {c}_{suffix}" if suffix
+                                    else f"{table}.{c}" for c in classifiers)
+                                if table else classifiers)
+                        elif "join" in parts:
+                            _, _, lhs_table, rhs_table = parts
+                            params[param] = " AND ".join((
+                                (
+                                    f"CASE WHEN ({lhs_table}.{c} = {rhs_table}.{c}) "
+                                    f"OR ({lhs_table}.{c} IS NULL AND {rhs_table}.{c} IS NULL) "
+                                    "THEN 0 ELSE 1 END = 0"
+                                ) for c in classifiers))
+                        elif "ddl" in parts:
+                            params[param] = ", ".join((f"{c} VARCHAR" for c in classifiers))
+                            
                     queries.append(sql.format(**params))
             
             return queries
     
-    raise IOError("Couldn't find file for query '{}'".format(name))
+    raise IOError(f"Couldn't find file for query '{name}'")
                 
 def find_project_classifiers(conn, batch=None):
-    with conn.begin():
-        table_suffix = "_{}".format(batch) if batch else ""
-        results = conn.execute(text("SELECT * FROM classifiersetdimension{} LIMIT 1".format(table_suffix)))
-        classifiers = [col for col in results.keys() if col.lower() not in ("id", "jobid")]
+    table_suffix = f"_{batch}" if batch else ""
+    results = conn.execute(text(f"SELECT * FROM classifiersetdimension{table_suffix} LIMIT 1"))
+    classifiers = [col for col in results.keys() if col.lower() not in ("id", "jobid")]
             
-    return {
-        "classifiers"       : ", ".join(classifiers),
-        "ddl_classifiers"   : ", ".join(("{} VARCHAR".format(c) for c in classifiers)),
-        "select_classifiers": ", ".join(("a.{}".format(c) for c in classifiers)),
-        "join_classifiers"  : " AND ".join((
-            "CASE WHEN (a.{0} = s.{0}) OR (a.{0} IS NULL AND s.{0} IS NULL) THEN 0 ELSE 1 END = 0".format(c)
-            for c in classifiers))
-    }
+    return classifiers
         
 def executemany(conn, queries, values):
     params = values[0].keys()
@@ -88,8 +104,8 @@ def compile_results(conn, db_type, indicators, batch=None, cleanup=False):
         
         sql = load_sql("05_populate_pool_collection_pools", db_type, classifiers, batch)[0]
         for name, pools in indicators["pool_collections"].items():
-            params = {"pool{}".format(i): pool for i, pool in enumerate(pools)}
-            pool_param_names = ", ".join((":{}".format(param) for param in params))
+            params = {f"pool{i}": pool for i, pool in enumerate(pools)}
+            pool_param_names = ", ".join((f":{param}" for param in params))
             conn.execute(text(sql.format(pools=pool_param_names)), name=name, **params)
         
         # A flux is a movement of carbon from any pool in the source collection to any pool in the
@@ -113,17 +129,17 @@ def compile_results(conn, db_type, indicators, batch=None, cleanup=False):
         
         sql = load_sql("09_populate_flux_indicator_collection_flux_indicators", db_type, classifiers, batch)[0]
         for name, fluxes in indicators["flux_collections"].items():
-            params = {"flux{}".format(i): flux for i, flux in enumerate(fluxes)}
-            flux_param_names = ", ".join((":{}".format(param) for param in params))
+            params = {f"flux{i}": flux for i, flux in enumerate(fluxes)}
+            flux_param_names = ", ".join((f":{param}" for param in params))
             conn.execute(text(sql.format(fluxes=flux_param_names)), name=name, **params)
         
         # Stock change indicators are groups of fluxes that are added or subtracted from each other.
         sql = load_sql("10_populate_stock_changes", db_type, classifiers, batch)[0]
         for name, details in indicators["stock_changes"].items():
-            add_flux_params = {"add_flux{}".format(i): flux for i, flux in enumerate(details.get("+") or ["_"])}
-            add_flux_param_names = ", ".join((":{}".format(param) for param in add_flux_params))
-            sub_flux_params = {"sub_flux{}".format(i): flux for i, flux in enumerate(details.get("-") or ["_"])}
-            sub_flux_param_names = ", ".join((":{}".format(param) for param in sub_flux_params))
+            add_flux_params = {f"add_flux{i}": flux for i, flux in enumerate(details.get("+") or ["_"])}
+            add_flux_param_names = ", ".join((f":{param}" for param in add_flux_params))
+            sub_flux_params = {f"sub_flux{i}": flux for i, flux in enumerate(details.get("-") or ["_"])}
+            sub_flux_param_names = ", ".join((f":{param}" for param in sub_flux_params))
             
             params = {}
             params.update(add_flux_params)
@@ -144,7 +160,7 @@ def compile_results(conn, db_type, indicators, batch=None, cleanup=False):
         
         for query in ("14_create_pool_indicators_view", "15_create_dist_indicators_view",
                       "16_create_age_indicators_view", "17_create_error_indicators_view",
-                      "18_create_total_disturbed_areas_view"):
+                      "18_create_total_disturbed_areas_view", "20_create_disturbance_fluxes_view"):
             for sql in load_sql(query, db_type, classifiers, batch):
                 conn.execute(text(sql))
                 
@@ -155,7 +171,7 @@ def compile_results(conn, db_type, indicators, batch=None, cleanup=False):
                 conn.execute(text(sql.format(indicator_table=table)))
                 
         if cleanup:
-            table_suffix = "_{}".format(batch) if batch else ""
+            table_suffix = f"_{batch}" if batch else ""
             for sql in [
                 "DROP TABLE IF EXISTS agearea{} CASCADE;",
                 "DROP TABLE IF EXISTS ageclassdimension{} CASCADE;",
@@ -192,7 +208,7 @@ def copy_reporting_tables(from_conn, from_schema, to_conn, to_schema=None):
     output_md = MetaData(bind=to_conn, schema=to_schema)
     with to_conn.begin():
         for fqn, table in md.tables.items():
-            logging.info("  {}".format(fqn))
+            logging.info(f"  {fqn}")
             table.tometadata(output_md, schema=None)
             
             output_table = Table(table.name, output_md)
@@ -226,7 +242,7 @@ if __name__ == "__main__":
     results_db_engine = create_engine(args.results_db)
     conn = results_db_engine.connect()
     if args.results_schema:
-        conn.execute(text("SET SEARCH_PATH={}".format(args.results_schema)))
+        conn.execute(text(f"SET SEARCH_PATH={args.results_schema}"))
     
     # Some queries are specialized for distributed runs using Postgres; these are the
     # files with the _pg suffix in sql\.
@@ -241,6 +257,6 @@ if __name__ == "__main__":
         output_db_engine = create_engine(args.output_db)
         output_conn = output_db_engine.connect()
         if args.output_schema:
-            output_conn.execute(text("CREATE SCHEMA IF NOT EXISTS {}".format(args.output_schema)))
+            output_conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {args.output_schema}"))
             
         copy_reporting_tables(conn, args.results_schema, output_conn, args.output_schema)

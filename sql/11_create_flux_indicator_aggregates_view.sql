@@ -3,10 +3,9 @@ SELECT
     fic.id AS flux_indicator_collection_id,
     fic.description AS indicator,
     CAST(fi.year AS INTEGER) AS year,
-    {classifiers},
+    {classifiers_select},
     fi.unfccc_land_class AS unfccc_land_class,
     fi.age_range AS age_range,
-    CAST(fi.area AS REAL) AS area,
     CAST(SUM(fi.flux_tc) AS REAL) AS flux_tc
 FROM r_flux_indicator_collections fic
 INNER JOIN r_flux_indicator_collection_flux_indicators fic_fi
@@ -17,7 +16,6 @@ GROUP BY
     fic.id,
     fic.description,
     fi.year,
-    fi.area,
-    {classifiers},
+    {classifiers_select},
     fi.unfccc_land_class,
     fi.age_range

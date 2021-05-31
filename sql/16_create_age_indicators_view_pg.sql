@@ -1,7 +1,7 @@
 CREATE UNLOGGED TABLE v_age_indicators{table_suffix} AS
 SELECT
    	CAST(l.year AS INTEGER) AS year,
-  	{classifiers},
+  	{classifiers_select},
     l.land_class AS unfccc_land_class,
     l.age_range AS age_range,
    	CAST(ROUND(CAST(SUM(a.area) AS NUMERIC), 6) AS REAL) AS area
@@ -13,6 +13,6 @@ INNER JOIN r_location{table_suffix} l
 WHERE l.year > 0
 GROUP BY
    l.year,
-   {classifiers},
+   {classifiers_select},
    l.land_class,
    l.age_range;

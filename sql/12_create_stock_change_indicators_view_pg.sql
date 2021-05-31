@@ -1,7 +1,7 @@
 CREATE UNLOGGED TABLE v_stock_change_indicators{table_suffix} AS
 SELECT
     sc.name AS indicator,
-    {classifiers},
+    {classifiers_select},
     f.unfccc_land_class AS unfccc_land_class,
     CAST(f.year AS INTEGER) AS year,
     f.age_range AS age_range,
@@ -11,7 +11,7 @@ INNER JOIN v_flux_indicator_aggregates{table_suffix} f
     ON sc.flux_indicator_collection_id = f.flux_indicator_collection_id
 GROUP BY
     sc.name,
-    {classifiers},
+    {classifiers_select},
     f.unfccc_land_class,
     f.age_range,
     f.year

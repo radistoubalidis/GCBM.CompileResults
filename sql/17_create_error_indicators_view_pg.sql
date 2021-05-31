@@ -1,7 +1,7 @@
 CREATE UNLOGGED TABLE v_error_indicators{table_suffix} AS
 SELECT
     CAST(l.year AS INTEGER) AS year,
-    {classifiers},
+    {classifiers_select},
     e.module AS module,
     e.error AS error,
     CAST(ROUND(CAST(SUM(l.area) AS NUMERIC), 6) AS REAL) AS area
@@ -12,6 +12,6 @@ LEFT JOIN r_location{table_suffix} l
     ON le.locationdimid = l.locationdimid
 GROUP BY
    l.year,
-   {classifiers},
+   {classifiers_select},
    e.module,
    e.error;

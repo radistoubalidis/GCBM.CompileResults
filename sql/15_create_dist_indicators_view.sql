@@ -1,49 +1,46 @@
 CREATE TABLE v_disturbance_indicators AS
 SELECT
-    {classifiers},
-    l.land_class AS unfccc_land_class,
-    CAST(l.year AS INTEGER) AS year,
+    {classifiers_select_current},
+    {classifiers_select_previous_previous},
+    current.land_class AS unfccc_land_class,
+    previous.land_class AS unfccc_land_class_previous,
+    CAST(current.year AS INTEGER) AS year,
     dt.disturbancetype AS disturbance_code,
     dt.disturbancetypename AS disturbance_type,
-    CAST(
-        CASE
-            WHEN ac.startage = -1 THEN 'N/A'
-            WHEN ac.endage = -1 THEN ac.startage || '+'
-            ELSE ac.startage || '-' || ac.endage
-        END
-        AS TEXT
-    ) AS pre_dist_age_range,
-    l.age_range AS post_dist_age_range,
+    previous.age_range AS pre_dist_age_range,
+    current.age_range AS post_dist_age_range,
     CAST(SUM(di.area) AS REAL) AS dist_area,
-    CAST(SUM(f.fluxvalue) AS REAL) AS dist_product,
-    CAST(SUM(f.fluxvalue) / SUM(di.area) AS REAL) AS dist_product_per_ha
+    CAST(SUM(f.fluxvalue) AS REAL) AS dist_carbon,
+    CAST(SUM(f.fluxvalue) / SUM(di.area) AS REAL) AS dist_carbon_per_ha
 FROM (
     SELECT
         locationdimid,
         moduleinfodimid,
         disturbancedimid,
-        SUM(f.fluxvalue) AS fluxvalue
-    FROM fluxes f
+        SUM(fluxvalue) AS fluxvalue
+    FROM fluxes
+    WHERE disturbancedimid IS NOT NULL
     GROUP BY
         locationdimid,
         moduleinfodimid,
         disturbancedimid
 ) AS f
-INNER JOIN r_location l
-    ON f.locationdimid = l.locationdimid
+INNER JOIN r_location current
+    ON f.locationdimid = current.locationdimid
 INNER JOIN disturbancedimension di
     ON f.disturbancedimid = di.id
 INNER JOIN disturbancetypedimension dt
     ON di.disturbancetypedimid = dt.id
-LEFT JOIN ageclassdimension ac
-    ON di.predistageclassdimid = ac.id
-WHERE l.year > 0
+INNER JOIN r_location previous
+    ON di.previouslocationdimid = previous.locationdimid
+WHERE current.year > 0
 GROUP BY
-    {classifiers},
-    l.land_class,
+    {classifiers_select_current},
+    {classifiers_select_previous},
+    current.land_class,
+    previous.land_class,
     dt.disturbancetype,
     dt.disturbancetypename,
-    ac.startage,
-    ac.endage,
-    l.age_range,
-    l.year;
+    current.age_range,
+    previous.age_range,
+    current.year;
