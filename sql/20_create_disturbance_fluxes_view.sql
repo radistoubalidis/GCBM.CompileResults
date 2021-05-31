@@ -17,12 +17,12 @@ INNER JOIN pooldimension src
     ON f.poolsrcdimid = src.id
 INNER JOIN pooldimension dst
     ON f.pooldstdimid = dst.id
+INNER JOIN disturbancedimension di
+    ON f.disturbancedimid = di.id
 INNER JOIN r_location current
     ON f.locationdimid = current.locationdimid
 INNER JOIN r_location previous
     ON di.previouslocationdimid = previous.locationdimid
-INNER JOIN disturbancedimension di
-    ON f.disturbancedimid = di.id
 INNER JOIN disturbancetypedimension dt
     ON di.disturbancetypedimid = dt.id
 WHERE current.year > 0
