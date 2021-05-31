@@ -6,8 +6,7 @@ SELECT
     pid.name AS indicator,
     CAST(l.year AS INTEGER) AS year,
     l.age_range AS age_range,
-    CAST(ROUND(CAST(SUM(p.poolvalue) AS NUMERIC), 6) AS REAL) AS pool_tc,
-    CAST(ROUND(CAST(SUM(p.poolvalue) / l.area AS NUMERIC), 6) AS REAL) AS pool_tc_per_ha
+    CAST(ROUND(CAST(SUM(p.poolvalue) AS NUMERIC), 6) AS REAL) AS pool_tc
 FROM r_pool_indicators{table_suffix} pid
 INNER JOIN r_pool_collection_pools{table_suffix} pcp
     ON pid.pool_collection_id = pcp.pool_collection_id
