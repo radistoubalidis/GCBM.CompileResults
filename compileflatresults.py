@@ -274,6 +274,9 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None):
     output_dir = os.path.dirname(output_db)
     os.makedirs(output_dir, exist_ok=True)
     
+    if os.path.exists(args.output_db):
+        os.remove(args.output_db)
+
     age_output_file = os.path.join(output_dir, "age.hdf5")
     merge("age_*.csv", "area").export_hdf5(age_output_file)
     if not os.path.exists(age_output_file):
@@ -347,7 +350,4 @@ if __name__ == "__main__":
     parser.add_argument("--indicator_config", help="indicator configuration file - defaults to a generic set")
     args = parser.parse_args()
     
-    if os.path.exists(args.output_db):
-        os.remove(args.output_db)
-
     compile_gcbm_output(args.results_path, args.output_db, args.indicator_config)
