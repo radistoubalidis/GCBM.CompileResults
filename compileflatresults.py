@@ -331,6 +331,9 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None):
         )
 
     create_views(output_db)
+    
+    for tmp_hdf5 in glob(output_dir, "*.hdf5"):
+        os.remove(tmp_hdf5)
 
 
 if __name__ == "__main__":
@@ -346,9 +349,5 @@ if __name__ == "__main__":
     
     if os.path.exists(args.output_db):
         os.remove(args.output_db)
-
-    indicators = json.load(open(
-        args.indicator_config
-        or os.path.join(os.path.dirname(__file__), "compileresults.json")))
 
     compile_gcbm_output(args.results_path, args.output_db, args.indicator_config)
