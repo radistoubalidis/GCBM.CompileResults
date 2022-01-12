@@ -4,9 +4,11 @@ import json
 import os
 import sys
 import sqlite3
+from contextlib import contextmanager
 from enum import Enum
 from argparse import ArgumentParser
 from glob import glob
+from tempfile import TemporaryDirectory
 from sqlalchemy import *
 
 
@@ -32,6 +34,15 @@ class FluxIndicator:
         self.from_pools = from_pools
         self.to_pools = to_pools
         self.flux_source = flux_source
+
+
+@contextmanager
+def vaex_open(file):
+    data = vaex.open(file)
+    try:
+        yield data
+    finally:
+        data.close()
         
         
 def read_flux_indicators(indicator_config):
@@ -46,15 +57,17 @@ def read_flux_indicators(indicator_config):
     return fluxes
 
 
-def merge(pattern, *sum_cols):
+def merge(pattern, output_path, *sum_cols):
     csv_data = [vaex.from_csv(csv) for csv in glob(pattern)]
     if not csv_data:
-        return
+        return False
         
     df = csv_data[0].concat(*csv_data[1:])
     df = df.groupby(set(df.columns) - set(sum_cols), agg={c: "sum" for c in sum_cols})
+    df.export_hdf5(output_path)
+    df.close()
     
-    return df
+    return True
 
 
 def vaex_to_table(data, db_path, table_name, *column_overrides, append=False, value_col=None):
@@ -85,28 +98,27 @@ def vaex_to_table(data, db_path, table_name, *column_overrides, append=False, va
             conn.execute(delete(table).where(text(f"{value_col} IS NULL")))
 
 
-def compile_flux_indicators(merged_flux_output_file, indicators, output_db):
+def compile_flux_indicators(merged_flux_data, indicators, output_db):
     flux_indicators = read_flux_indicators(indicators)
-    all_flux_data = vaex.open(merged_flux_output_file)
 
-    groupby_columns = (set(all_flux_data.columns)
+    groupby_columns = (set(merged_flux_data.columns)
         - {"flux_tc", "from_pool", "to_pool"}
-        - set(c for c in all_flux_data.columns if c.endswith("previous")))
+        - set(c for c in merged_flux_data.columns if c.endswith("previous")))
         
     for flux in flux_indicators:
         if flux.flux_source == FluxSource.Disturbance:
-            all_flux_data.select(~all_flux_data.disturbance_type.ismissing()
-                & all_flux_data.from_pool.isin(flux.from_pools)
-                & all_flux_data.to_pool.isin(flux.to_pools))
+            merged_flux_data.select(~merged_flux_data.disturbance_type.ismissing()
+                & merged_flux_data.from_pool.isin(flux.from_pools)
+                & merged_flux_data.to_pool.isin(flux.to_pools))
         elif flux.flux_source == FluxSource.AnnualProcess:
-            all_flux_data.select(all_flux_data.disturbance_type.ismissing()
-                & all_flux_data.from_pool.isin(flux.from_pools)
-                & all_flux_data.to_pool.isin(flux.to_pools))
+            merged_flux_data.select(merged_flux_data.disturbance_type.ismissing()
+                & merged_flux_data.from_pool.isin(flux.from_pools)
+                & merged_flux_data.to_pool.isin(flux.to_pools))
         else:
-            all_flux_data.select(all_flux_data.from_pool.isin(flux.from_pools)
-                & all_flux_data.to_pool.isin(flux.to_pools))
+            merged_flux_data.select(merged_flux_data.from_pool.isin(flux.from_pools)
+                & merged_flux_data.to_pool.isin(flux.to_pools))
         
-        flux_data = all_flux_data.groupby(
+        flux_data = merged_flux_data.groupby(
             groupby_columns,
             agg={"flux_tc": vaex.agg.sum("flux_tc", selection=True)})
             
@@ -274,69 +286,68 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None):
     output_dir = os.path.dirname(output_db)
     os.makedirs(output_dir, exist_ok=True)
     
-    if os.path.exists(args.output_db):
-        os.remove(args.output_db)
+    if os.path.exists(output_db):
+        os.remove(output_db)
 
-    age_output_file = os.path.join(output_dir, "age.hdf5")
-    merge("age_*.csv", "area").export_hdf5(age_output_file)
-    if not os.path.exists(age_output_file):
-        logging.info(f"No results to process in {results_path}")
-        return
-    
-    vaex_to_table(vaex.open(age_output_file), output_db, "raw_ages",
-        Column("year", Integer),
-        Column("area", Numeric)
-    )
-
-    base_columns = set(vaex.open(age_output_file).columns) - {"area"}
-    indicators = json.load(open(
-        indicator_config_file
-        or os.path.join(os.path.dirname(__file__), "compileresults.json")))
-    
-    dist_output_file = os.path.join(output_dir, "disturbance.hdf5")
-    merge("disturbance_*.csv", "area").export_hdf5(dist_output_file)
-    if os.path.exists(dist_output_file):
-        vaex_to_table(vaex.open(dist_output_file), output_db, "raw_disturbances",
-            Column("year", Integer),
-            Column("disturbance_code", Integer),
-            Column("area", Numeric)
-        )
-
-    flux_output_file = os.path.join(output_dir, "flux.hdf5")
-    merge("flux_*.csv", "flux_tc").export_hdf5(flux_output_file)
-    if os.path.exists(flux_output_file):
-        vaex_to_table(vaex.open(flux_output_file), output_db, "raw_fluxes",
-            Column("year", Integer),
-            Column("disturbance_code", Integer),
-            Column("flux_tc", Numeric)
-        )
-
-        compile_flux_indicators(flux_output_file, indicators, output_db)
-        compile_flux_indicator_aggregates(base_columns, indicators, output_db)
-        compile_stock_change_indicators(base_columns, indicators, output_db)
-
-    pool_output_file = os.path.join(output_dir, "pool.hdf5")
-    merge("pool_*.csv", "pool_tc").export_hdf5(pool_output_file)
-    if os.path.exists(pool_output_file):
-        vaex_to_table(vaex.open(pool_output_file), output_db, "raw_pools",
-            Column("year", Integer),
-            Column("pool_tc", Numeric)
-        )
+    with TemporaryDirectory(dir=output_dir) as tmp:
+        age_output_file = os.path.join(tmp, "age.hdf5")
+        if not merge(os.path.join(results_path, "age_*.csv"), age_output_file, "area"):
+            logging.info(f"No results to process in {results_path}")
+            return
         
-        compile_pool_indicators(base_columns, indicators, output_db)
-        
-    error_output_file = os.path.join(output_dir, "error.hdf5")
-    merge("error_*.csv", "area").export_hdf5(error_output_file)
-    if os.path.exists(error_output_file):
-        vaex_to_table(vaex.open(error_output_file), output_db, "raw_errors",
-            Column("year", Integer),
-            Column("area", Numeric)
-        )
+        with vaex_open(age_output_file) as data:
+            vaex_to_table(data, output_db, "raw_ages",
+                Column("year", Integer),
+                Column("area", Numeric)
+            )
 
-    create_views(output_db)
-    
-    for tmp_hdf5 in glob(output_dir, "*.hdf5"):
-        os.remove(tmp_hdf5)
+        base_columns = set(vaex.open(age_output_file).columns) - {"area"}
+        indicators = json.load(open(
+            indicator_config_file
+            or os.path.join(os.path.dirname(__file__), "compileresults.json")))
+        
+        dist_output_file = os.path.join(tmp, "disturbance.hdf5")
+        if merge(os.path.join(results_path, "disturbance_*.csv"), dist_output_file, "area"):
+            with vaex_open(dist_output_file) as data:
+                vaex_to_table(data, output_db, "raw_disturbances",
+                    Column("year", Integer),
+                    Column("disturbance_code", Integer),
+                    Column("area", Numeric)
+                )
+
+        flux_output_file = os.path.join(tmp, "flux.hdf5")
+        if merge(os.path.join(results_path, "flux_*.csv"), flux_output_file, "flux_tc"):
+            with vaex_open(flux_output_file) as data:
+                vaex_to_table(data, output_db, "raw_fluxes",
+                    Column("year", Integer),
+                    Column("disturbance_code", Integer),
+                    Column("flux_tc", Numeric)
+                )
+
+                compile_flux_indicators(data, indicators, output_db)
+
+            compile_flux_indicator_aggregates(base_columns, indicators, output_db)
+            compile_stock_change_indicators(base_columns, indicators, output_db)
+
+        pool_output_file = os.path.join(tmp, "pool.hdf5")
+        if merge(os.path.join(results_path, "pool_*.csv"), pool_output_file, "pool_tc"):
+            with vaex_open(pool_output_file) as data:
+                vaex_to_table(data, output_db, "raw_pools",
+                    Column("year", Integer),
+                    Column("pool_tc", Numeric)
+                )
+            
+            compile_pool_indicators(base_columns, indicators, output_db)
+            
+        error_output_file = os.path.join(tmp, "error.hdf5")
+        if merge(os.path.join(results_path, "error_*.csv"), error_output_file, "area"):
+            with vaex_open(error_output_file) as data:
+                vaex_to_table(data, output_db, "raw_errors",
+                    Column("year", Integer),
+                    Column("area", Numeric)
+                )
+
+        create_views(output_db)
 
 
 if __name__ == "__main__":
