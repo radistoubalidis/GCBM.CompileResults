@@ -263,7 +263,7 @@ def create_views(output_db):
                     {','.join(raw_dist_cols)},
                     age_range_previous AS pre_dist_age_range,
                     age_range AS post_dist_age_range,
-                    SUM(flux_tc)
+                    SUM(flux_tc) AS flux_tc
                 FROM raw_fluxes
                 WHERE disturbance_type IS NOT NULL
                 GROUP BY {','.join(raw_dist_cols)}
