@@ -232,8 +232,8 @@ def create_views(output_db):
         - {"age_range", "age_range_previous"})}
     
     raw_dist_cols = {f'"{c}"' for c in (
-        {c for c in conn.execute("SELECT * FROM raw_disturbances LIMIT 1").keys()}
-        - {"age_range", "age_range_previous", "area"})}
+        {c for c in conn.execute("SELECT * FROM raw_fluxes LIMIT 1").keys()}
+        - {"age_range", "age_range_previous", "flux_tc", "from_pool", "to_pool"})}
     
     with conn.begin():
         for sql in (
