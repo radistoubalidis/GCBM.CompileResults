@@ -218,7 +218,7 @@ def compile_pool_indicators(base_columns, indicator_config, output_db):
                     SUM(pool_tc)
                 FROM raw_pools
                 WHERE pool IN ({','.join('?' * len(pools))})
-                    AND year <> 0
+                    AND year > 0
                 GROUP BY {','.join(base_columns)}
                 """, [name] + pools)
 
@@ -237,7 +237,7 @@ def create_views(output_db):
     
     with conn.begin():
         for sql in (
-            "CREATE VIEW IF NOT EXISTS v_age_indicators AS SELECT * FROM raw_ages",
+            "CREATE VIEW IF NOT EXISTS v_age_indicators AS SELECT * FROM raw_ages WHERE year > 0",
             "CREATE VIEW IF NOT EXISTS v_error_indicators AS SELECT * FROM raw_errors",
             f"""
             CREATE VIEW IF NOT EXISTS v_disturbance_fluxes AS
