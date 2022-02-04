@@ -58,14 +58,19 @@ def read_flux_indicators(indicator_config):
 
 
 def merge(pattern, output_path, *sum_cols):
-    csv_data = [vaex.from_csv(csv) for csv in glob(pattern)]
-    if not csv_data:
+    csv_files = glob(pattern)
+    if not csv_files:
         return False
+
+    for csv_file in csv_files:
+        if os.path.exists(f"{csv_file}.hdf5"):
+            continue
         
-    df = csv_data[0].concat(*csv_data[1:])
-    df = df.groupby(set(df.columns) - set(sum_cols), agg={c: "sum" for c in sum_cols})
-    df.export_hdf5(output_path)
-    df.close()
+        vaex.from_csv(csv_file, convert=True)
+        
+    with vaex_open(f"{pattern}.hdf5") as df:
+        df = df.groupby(set(df.columns) - set(sum_cols), agg={c: "sum" for c in sum_cols})
+        df.export_hdf5(output_path)
     
     return True
 
