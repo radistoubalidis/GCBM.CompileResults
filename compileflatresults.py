@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import sqlite3
+from itertools import islice
 from contextlib import contextmanager
 from enum import Enum
 from argparse import ArgumentParser
@@ -57,6 +58,19 @@ def read_flux_indicators(indicator_config):
     return fluxes
 
 
+def chunk(it, size):
+    it = iter(it)
+    return iter(lambda: tuple(islice(it, size)), ())
+
+
+def merge_chunk(files, output_path):
+    if os.path.exists(output_path):
+        os.remove(output_path)
+    
+    with vaex_open(files) as df:
+        df.export_hdf5(output_path)
+
+
 def merge(pattern, output_path, *sum_cols):
     csv_files = glob(pattern)
     if not csv_files:
@@ -66,9 +80,19 @@ def merge(pattern, output_path, *sum_cols):
         if os.path.exists(f"{csv_file}.hdf5"):
             continue
         
-        vaex.from_csv(csv_file, convert=True)
-        
-    with vaex_open(f"{pattern}.hdf5") as df:
+        vaex.from_csv(csv_file, convert=True, copy_index=False)
+    
+    merged_chunks = []
+    for i, batch in enumerate(chunk(glob(f"{pattern}.hdf5"), 250)):
+        merged_output_file = f"{os.path.splitext(output_path)[0]}_chunk_{i}.hdf5"
+        merge_chunk(batch, merged_output_file)
+        merged_chunks.append(merged_output_file)
+    
+    final_merged_file = f"{os.path.splitext(output_path)[0]}_merged.hdf5"
+    with vaex_open(merged_chunks) as all_chunks:
+        all_chunks.export_hdf5(final_merged_file)
+    
+    with vaex_open(final_merged_file) as df:
         df = df.groupby(set(df.columns) - set(sum_cols), agg={c: "sum" for c in sum_cols})
         df.export_hdf5(output_path)
     
@@ -93,14 +117,11 @@ def vaex_to_table(data, db_path, table_name, *column_overrides, append=False, va
             
         table.create(output_db_engine, checkfirst=True)
         
-        if value_col:
-            data.select(f"{value_col} != 0")
-        
-        for _, _, chunk in data.to_records(selection=value_col is not None, chunk_size=10000):
+        for _, _, chunk in data.to_records(chunk_size=10000):
             conn.execute(insert(table), chunk)
         
         if value_col:
-            conn.execute(delete(table).where(text(f"{value_col} IS NULL")))
+            conn.execute(delete(table).where(text(f"{value_col} IS NULL OR {value_col} = 0.0")))
 
 
 def compile_flux_indicators(merged_flux_data, indicators, output_db):
@@ -122,6 +143,9 @@ def compile_flux_indicators(merged_flux_data, indicators, output_db):
         else:
             merged_flux_data.select(merged_flux_data.from_pool.isin(flux.from_pools)
                 & merged_flux_data.to_pool.isin(flux.to_pools))
+        
+        if merged_flux_data.count(selection=True) == 0:
+            continue
         
         flux_data = merged_flux_data.groupby(
             groupby_columns,
@@ -352,7 +376,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None):
                     Column("area", Numeric)
                 )
 
-        create_views(output_db)
+    create_views(output_db)
 
 
 if __name__ == "__main__":
