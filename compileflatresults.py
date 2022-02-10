@@ -80,7 +80,7 @@ def merge(pattern, output_path, *sum_cols):
         if os.path.exists(f"{csv_file}.hdf5"):
             continue
         
-        vaex.from_csv(csv_file, convert=True, copy_index=False)
+        vaex.from_csv(csv_file, convert=True, copy_index=False, keep_default_na=False)
     
     merged_chunks = []
     for i, batch in enumerate(chunk(glob(f"{pattern}.hdf5"), 250)):
@@ -93,7 +93,7 @@ def merge(pattern, output_path, *sum_cols):
         all_chunks.export_hdf5(final_merged_file)
     
     with vaex_open(final_merged_file) as df:
-        df = df.groupby(set(df.columns) - set(sum_cols), agg={c: "sum" for c in sum_cols})
+        df = df.groupby(set(df.get_column_names()) - set(sum_cols), agg={c: "sum" for c in sum_cols})
         df.export_hdf5(output_path)
     
     return True
@@ -103,8 +103,9 @@ def vaex_to_table(data, db_path, table_name, *column_overrides, append=False, va
     output_db_engine = create_engine(f"sqlite:///{db_path}")
     conn = output_db_engine.connect()
     with conn.begin():
-        cols = list(data.columns)
+        cols = list(data.get_column_names())
         override_cols = [c.name for c in column_overrides]
+        string_cols = set(cols) - set(override_cols)
     
         md = MetaData()
         table = Table(table_name, md,
@@ -117,8 +118,14 @@ def vaex_to_table(data, db_path, table_name, *column_overrides, append=False, va
             
         table.create(output_db_engine, checkfirst=True)
         
+        for col in string_cols:
+            data[col].to_string()
+        
         for _, _, chunk in data.to_records(chunk_size=10000):
             conn.execute(insert(table), chunk)
+        
+        for col in string_cols:
+            conn.execute(f"UPDATE {table} SET {col} = NULL WHERE LOWER({col}) IN ('nan', 'nan.0')")
         
         if value_col:
             conn.execute(delete(table).where(text(f"{value_col} IS NULL OR {value_col} = 0.0")))
@@ -127,9 +134,9 @@ def vaex_to_table(data, db_path, table_name, *column_overrides, append=False, va
 def compile_flux_indicators(merged_flux_data, indicators, output_db):
     flux_indicators = read_flux_indicators(indicators)
 
-    groupby_columns = (set(merged_flux_data.columns)
+    groupby_columns = (set(merged_flux_data.get_column_names())
         - {"flux_tc", "from_pool", "to_pool"}
-        - set(c for c in merged_flux_data.columns if c.endswith("previous")))
+        - set(c for c in merged_flux_data.get_column_names() if c.endswith("previous")))
         
     for flux in flux_indicators:
         if flux.flux_source == FluxSource.Disturbance:
@@ -330,7 +337,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None):
                 Column("area", Numeric)
             )
 
-        base_columns = set(vaex.open(age_output_file).columns) - {"area"}
+        base_columns = set(vaex.open(age_output_file).get_column_names()) - {"area"}
         indicators = json.load(open(
             indicator_config_file
             or os.path.join(os.path.dirname(__file__), "compileresults.json")))
