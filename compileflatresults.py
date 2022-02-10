@@ -140,11 +140,13 @@ def compile_flux_indicators(merged_flux_data, indicators, output_db):
         
     for flux in flux_indicators:
         if flux.flux_source == FluxSource.Disturbance:
-            merged_flux_data.select(~merged_flux_data.disturbance_type.isna()
+            merged_flux_data.select(
+                (~merged_flux_data.disturbance_type.isna() & (merged_flux_data.disturbance_type != ""))
                 & merged_flux_data.from_pool.isin(flux.from_pools)
                 & merged_flux_data.to_pool.isin(flux.to_pools))
         elif flux.flux_source == FluxSource.AnnualProcess:
-            merged_flux_data.select(merged_flux_data.disturbance_type.isna()
+            merged_flux_data.select(
+                (merged_flux_data.disturbance_type.isna() | (merged_flux_data.disturbance_type == ""))
                 & merged_flux_data.from_pool.isin(flux.from_pools)
                 & merged_flux_data.to_pool.isin(flux.to_pools))
         else:
