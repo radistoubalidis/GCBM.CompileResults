@@ -58,17 +58,38 @@ def read_flux_indicators(indicator_config):
     return fluxes
 
 
-def chunk(it, size):
+def get_open_file_limit():
+    try:
+        if os.name == "nt":
+            import win32file
+            win32file._setmaxstdio(2048)
+            return win32file._getmaxstdio()
+        else:
+            import resource
+            return resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+    except:
+        return 100
+
+
+def chunk(it, size=None):
     it = iter(it)
+    size = size or get_open_file_limit()
     return iter(lambda: tuple(islice(it, size)), ())
 
 
-def merge_chunk(files, output_path):
+def merge_chunk(files, output_path, sum_cols):
     if os.path.exists(output_path):
         os.remove(output_path)
     
+    tmp_output = "_tmp".join(os.path.splitext(output_path))
     with vaex_open(files) as df:
+        df.export_hdf5(tmp_output)
+    
+    with vaex_open(tmp_output) as df:
+        df = df.groupby(set(df.get_column_names()) - set(sum_cols), agg={c: "sum" for c in sum_cols})
         df.export_hdf5(output_path)
+        
+    os.remove(tmp_output)
 
 
 def merge(pattern, output_path, *sum_cols):
@@ -76,25 +97,38 @@ def merge(pattern, output_path, *sum_cols):
     if not csv_files:
         return False
 
+    dtype = None
     for csv_file in csv_files:
         if os.path.exists(f"{csv_file}.hdf5"):
             continue
+
+        if not dtype:
+            header = next(csv.reader(open(full_csv_path)))
+            dtype = {
+                c: np.int if c == "year"
+                   else np.float32 if c in ("area", "flux_tc", "pool_tc")
+                   else np.str
+                for c in header
+            }
         
-        vaex.from_csv(csv_file, convert=True, copy_index=False, keep_default_na=False)
+        vaex.from_csv(csv_file, convert=True, low_memory=False, dtype=dtype, keep_default_na=False)
     
     merged_chunks = []
-    for i, batch in enumerate(chunk(glob(f"{pattern}.hdf5"), 250)):
-        merged_output_file = f"{os.path.splitext(output_path)[0]}_chunk_{i}.hdf5"
-        merge_chunk(batch, merged_output_file)
+    for i, batch in enumerate(chunk(glob(f"{pattern}.hdf5"))):
+        merged_output_file = f"_chunk_{i}".join(os.path.splitext(output_path))
+        merge_chunk(batch, merged_output_file, sum_cols)
         merged_chunks.append(merged_output_file)
     
-    final_merged_file = f"{os.path.splitext(output_path)[0]}_merged.hdf5"
-    with vaex_open(merged_chunks) as all_chunks:
-        all_chunks.export_hdf5(final_merged_file)
+    if len(merged_chunks) > 1:
+        final_merged_file = "_merged".join(os.path.splitext(output_path))
+        with vaex_open(merged_chunks) as all_chunks:
+            all_chunks.export_hdf5(final_merged_file)
     
-    with vaex_open(final_merged_file) as df:
-        df = df.groupby(set(df.get_column_names()) - set(sum_cols), agg={c: "sum" for c in sum_cols})
-        df.export_hdf5(output_path)
+        with vaex_open(final_merged_file) as df:
+            df = df.groupby(set(df.get_column_names()) - set(sum_cols), agg={c: "sum" for c in sum_cols})
+            df.export_hdf5(output_path)
+    else:
+        os.rename(merged_chunks[0], output_file)
     
     return True
 
