@@ -94,7 +94,8 @@ def merge_chunk(files, output_path, sum_cols):
 
 def merge(pattern, output_path, *sum_cols):
     csv_files = glob(pattern)
-    if not csv_files:
+    hdf_files = glob(f"{pattern}.hdf5")
+    if not (csv_files or hdf_files):
         return False
 
     dtype = None
@@ -127,8 +128,12 @@ def merge(pattern, output_path, *sum_cols):
         with vaex_open(final_merged_file) as df:
             df = df.groupby(set(df.get_column_names()) - set(sum_cols), agg={c: "sum" for c in sum_cols})
             df.export_hdf5(output_path)
+        try:
+            os.remove(final_merged_file)
+        except:
+            pass
     else:
-        os.rename(merged_chunks[0], output_file)
+        os.rename(merged_chunks[0], output_path)
     
     return True
 
