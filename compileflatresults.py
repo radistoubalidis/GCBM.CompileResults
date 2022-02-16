@@ -1,3 +1,6 @@
+import numpy as np
+import csv
+import uuid
 import vaex
 import logging
 import json
@@ -92,7 +95,7 @@ def merge_chunk(files, output_path, sum_cols):
     os.remove(tmp_output)
 
 
-def merge(pattern, output_path, *sum_cols):
+def merge(pattern, output_path, *sum_cols, chunk_size=None):
     csv_files = glob(pattern)
     hdf_files = glob(f"{pattern}.hdf5")
     if not (csv_files or hdf_files):
@@ -104,7 +107,7 @@ def merge(pattern, output_path, *sum_cols):
             continue
 
         if not dtype:
-            header = next(csv.reader(open(full_csv_path)))
+            header = next(csv.reader(open(csv_file)))
             dtype = {
                 c: np.int if c == "year"
                    else np.float32 if c in ("area", "flux_tc", "pool_tc")
@@ -114,15 +117,19 @@ def merge(pattern, output_path, *sum_cols):
         
         vaex.from_csv(csv_file, convert=True, low_memory=False, dtype=dtype, keep_default_na=False)
     
-    merged_chunks = []
-    for i, batch in enumerate(chunk(glob(f"{pattern}.hdf5"))):
-        merged_output_file = f"_chunk_{i}".join(os.path.splitext(output_path))
-        merge_chunk(batch, merged_output_file, sum_cols)
-        merged_chunks.append(merged_output_file)
+    files_to_merge = glob(f"{pattern}.hdf5")
+    while len(files_to_merge) > chunk_size:
+        merged_chunks = []
+        for batch in chunk(files_to_merge, chunk_size):
+            merged_output_file = f"_chunk_{uuid.uuid1()}".join(os.path.splitext(output_path))
+            merge_chunk(batch, merged_output_file, sum_cols)
+            merged_chunks.append(merged_output_file)
+        
+        files_to_merge = merged_chunks
     
-    if len(merged_chunks) > 1:
+    if len(files_to_merge) > 1:
         final_merged_file = "_merged".join(os.path.splitext(output_path))
-        with vaex_open(merged_chunks) as all_chunks:
+        with vaex_open(files_to_merge) as all_chunks:
             all_chunks.export_hdf5(final_merged_file)
     
         with vaex_open(final_merged_file) as df:
@@ -359,7 +366,7 @@ def create_views(output_db):
             conn.execute(sql)
 
 
-def compile_gcbm_output(results_path, output_db, indicator_config_file=None):
+def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chunk_size=None):
     output_dir = os.path.dirname(output_db)
     os.makedirs(output_dir, exist_ok=True)
     
@@ -368,7 +375,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None):
 
     with TemporaryDirectory(dir=output_dir) as tmp:
         age_output_file = os.path.join(tmp, "age.hdf5")
-        if not merge(os.path.join(results_path, "age_*.csv"), age_output_file, "area"):
+        if not merge(os.path.join(results_path, "age_*.csv"), age_output_file, "area", chunk_size=chunk_size):
             logging.info(f"No results to process in {results_path}")
             return
         
@@ -384,7 +391,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None):
             or os.path.join(os.path.dirname(__file__), "compileresults.json")))
         
         dist_output_file = os.path.join(tmp, "disturbance.hdf5")
-        if merge(os.path.join(results_path, "disturbance_*.csv"), dist_output_file, "area"):
+        if merge(os.path.join(results_path, "disturbance_*.csv"), dist_output_file, "area", chunk_size=chunk_size):
             with vaex_open(dist_output_file) as data:
                 vaex_to_table(data, output_db, "raw_disturbances",
                     Column("year", Integer),
@@ -393,7 +400,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None):
                 )
 
         flux_output_file = os.path.join(tmp, "flux.hdf5")
-        if merge(os.path.join(results_path, "flux_*.csv"), flux_output_file, "flux_tc"):
+        if merge(os.path.join(results_path, "flux_*.csv"), flux_output_file, "flux_tc", chunk_size=chunk_size):
             with vaex_open(flux_output_file) as data:
                 vaex_to_table(data, output_db, "raw_fluxes",
                     Column("year", Integer),
@@ -407,7 +414,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None):
             compile_stock_change_indicators(base_columns, indicators, output_db)
 
         pool_output_file = os.path.join(tmp, "pool.hdf5")
-        if merge(os.path.join(results_path, "pool_*.csv"), pool_output_file, "pool_tc"):
+        if merge(os.path.join(results_path, "pool_*.csv"), pool_output_file, "pool_tc", chunk_size=chunk_size):
             with vaex_open(pool_output_file) as data:
                 vaex_to_table(data, output_db, "raw_pools",
                     Column("year", Integer),
@@ -417,7 +424,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None):
             compile_pool_indicators(base_columns, indicators, output_db)
             
         error_output_file = os.path.join(tmp, "error.hdf5")
-        if merge(os.path.join(results_path, "error_*.csv"), error_output_file, "area"):
+        if merge(os.path.join(results_path, "error_*.csv"), error_output_file, "area", chunk_size=chunk_size):
             with vaex_open(error_output_file) as data:
                 vaex_to_table(data, output_db, "raw_errors",
                     Column("year", Integer),
@@ -436,6 +443,7 @@ if __name__ == "__main__":
     parser.add_argument("results_path",       help="path to CSV output files", type=os.path.abspath)
     parser.add_argument("output_db",          help="path to the database to write results tables to", type=os.path.abspath)
     parser.add_argument("--indicator_config", help="indicator configuration file - defaults to a generic set")
+    parser.add_argument("--chunk_size",       help="number of CSV files to merge at a time", type=int)
     args = parser.parse_args()
     
-    compile_gcbm_output(args.results_path, args.output_db, args.indicator_config)
+    compile_gcbm_output(args.results_path, args.output_db, args.indicator_config, args.chunk_size)
