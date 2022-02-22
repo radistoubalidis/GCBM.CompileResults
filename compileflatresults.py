@@ -91,7 +91,9 @@ def merge_chunk(files, output_path, sum_cols):
     with vaex_open(tmp_output) as df:
 		attempt = 1
         try:
-	        df = df.groupby(set(df.get_column_names()) - set(sum_cols), agg={c: "sum" for c in sum_cols})
+	        df = df.groupby(set(df.get_column_names()) - set(sum_cols),
+                            agg={c: "sum" for c in sum_cols},
+                            assume_sparse=True)
     	except:
 			if attempt > 3:
 				raise
@@ -145,7 +147,10 @@ def merge(pattern, output_path, *sum_cols, chunk_size):
             all_chunks.export(final_merged_file)
     
         with vaex_open(final_merged_file) as df:
-            df = df.groupby(set(df.get_column_names()) - set(sum_cols), agg={c: "sum" for c in sum_cols})
+            df = df.groupby(set(df.get_column_names()) - set(sum_cols),
+                            agg={c: "sum" for c in sum_cols},
+                            assume_sparse=True)
+
             df.export(output_path)
         try:
             os.remove(final_merged_file)
@@ -216,7 +221,8 @@ def compile_flux_indicators(merged_flux_data, indicators, output_db):
         
         flux_data = merged_flux_data.groupby(
             groupby_columns,
-            agg={"flux_tc": vaex.agg.sum("flux_tc", selection=True)})
+            agg={"flux_tc": vaex.agg.sum("flux_tc", selection=True)},
+            assume_sparse=True)
             
         flux_data["indicator"] = vaex.vconstant(flux.name, flux_data.shape[0])
             
