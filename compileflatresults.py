@@ -47,6 +47,7 @@ def vaex_open(file):
         yield data
     finally:
         data.close()
+        data = None
         
         
 def read_flux_indicators(indicator_config):
@@ -74,9 +75,8 @@ def get_open_file_limit():
         return 100
 
 
-def chunk(it, size=None):
+def chunk(it, size):
     it = iter(it)
-    size = size or get_open_file_limit()
     return iter(lambda: tuple(islice(it, size)), ())
 
 
@@ -86,24 +86,34 @@ def merge_chunk(files, output_path, sum_cols):
     
     tmp_output = "_tmp".join(os.path.splitext(output_path))
     with vaex_open(files) as df:
-        df.export_hdf5(tmp_output)
+        df.export(tmp_output)
     
     with vaex_open(tmp_output) as df:
-        df = df.groupby(set(df.get_column_names()) - set(sum_cols), agg={c: "sum" for c in sum_cols})
-        df.export_hdf5(output_path)
+		attempt = 1
+        try:
+	        df = df.groupby(set(df.get_column_names()) - set(sum_cols), agg={c: "sum" for c in sum_cols})
+    	except:
+			if attempt > 3:
+				raise
+				
+        	print(f"Aggregation error - retrying")
+			attempt += 1
+            
+        df.export(output_path)
         
     os.remove(tmp_output)
 
 
-def merge(pattern, output_path, *sum_cols, chunk_size=None):
+def merge(pattern, output_path, *sum_cols, chunk_size):
     csv_files = glob(pattern)
-    hdf_files = glob(f"{pattern}.hdf5")
-    if not (csv_files or hdf_files):
+    converted_files = glob(f"{pattern}.parquet")
+    if not (csv_files or converted_files):
         return False
 
     dtype = None
     for csv_file in csv_files:
-        if os.path.exists(f"{csv_file}.hdf5"):
+		converted_file = f"{csv_file}.parquet"
+        if os.path.exists(converted_file):
             continue
 
         if not dtype:
@@ -115,9 +125,11 @@ def merge(pattern, output_path, *sum_cols, chunk_size=None):
                 for c in header
             }
         
-        vaex.from_csv(csv_file, convert=True, low_memory=False, dtype=dtype, keep_default_na=False)
+        vaex.from_csv(
+            csv_file, low_memory=False, dtype=dtype, keep_default_na=False
+        ).export(converted_file)
     
-    files_to_merge = glob(f"{pattern}.hdf5")
+    files_to_merge = glob(f"{pattern}.parquet")
     while len(files_to_merge) > chunk_size:
         merged_chunks = []
         for batch in chunk(files_to_merge, chunk_size):
@@ -130,11 +142,11 @@ def merge(pattern, output_path, *sum_cols, chunk_size=None):
     if len(files_to_merge) > 1:
         final_merged_file = "_merged".join(os.path.splitext(output_path))
         with vaex_open(files_to_merge) as all_chunks:
-            all_chunks.export_hdf5(final_merged_file)
+            all_chunks.export(final_merged_file)
     
         with vaex_open(final_merged_file) as df:
             df = df.groupby(set(df.get_column_names()) - set(sum_cols), agg={c: "sum" for c in sum_cols})
-            df.export_hdf5(output_path)
+            df.export(output_path)
         try:
             os.remove(final_merged_file)
         except:
@@ -367,6 +379,7 @@ def create_views(output_db):
 
 
 def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chunk_size=None):
+    chunk_size = chunk_size or get_open_file_limit()
     output_dir = os.path.dirname(output_db)
     os.makedirs(output_dir, exist_ok=True)
     
@@ -374,7 +387,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
         os.remove(output_db)
 
     with TemporaryDirectory(dir=output_dir) as tmp:
-        age_output_file = os.path.join(tmp, "age.hdf5")
+        age_output_file = os.path.join(tmp, "age.parquet")
         if not merge(os.path.join(results_path, "age_*.csv"), age_output_file, "area", chunk_size=chunk_size):
             logging.info(f"No results to process in {results_path}")
             return
@@ -390,7 +403,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
             indicator_config_file
             or os.path.join(os.path.dirname(__file__), "compileresults.json")))
         
-        dist_output_file = os.path.join(tmp, "disturbance.hdf5")
+        dist_output_file = os.path.join(tmp, "disturbance.parquet")
         if merge(os.path.join(results_path, "disturbance_*.csv"), dist_output_file, "area", chunk_size=chunk_size):
             with vaex_open(dist_output_file) as data:
                 vaex_to_table(data, output_db, "raw_disturbances",
@@ -399,7 +412,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
                     Column("area", Numeric)
                 )
 
-        flux_output_file = os.path.join(tmp, "flux.hdf5")
+        flux_output_file = os.path.join(tmp, "flux.parquet")
         if merge(os.path.join(results_path, "flux_*.csv"), flux_output_file, "flux_tc", chunk_size=chunk_size):
             with vaex_open(flux_output_file) as data:
                 vaex_to_table(data, output_db, "raw_fluxes",
@@ -413,7 +426,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
             compile_flux_indicator_aggregates(base_columns, indicators, output_db)
             compile_stock_change_indicators(base_columns, indicators, output_db)
 
-        pool_output_file = os.path.join(tmp, "pool.hdf5")
+        pool_output_file = os.path.join(tmp, "pool.parquet")
         if merge(os.path.join(results_path, "pool_*.csv"), pool_output_file, "pool_tc", chunk_size=chunk_size):
             with vaex_open(pool_output_file) as data:
                 vaex_to_table(data, output_db, "raw_pools",
@@ -423,7 +436,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
             
             compile_pool_indicators(base_columns, indicators, output_db)
             
-        error_output_file = os.path.join(tmp, "error.hdf5")
+        error_output_file = os.path.join(tmp, "error.parquet")
         if merge(os.path.join(results_path, "error_*.csv"), error_output_file, "area", chunk_size=chunk_size):
             with vaex_open(error_output_file) as data:
                 vaex_to_table(data, output_db, "raw_errors",
