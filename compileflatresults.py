@@ -41,8 +41,8 @@ class FluxIndicator:
 
 
 @contextmanager
-def vaex_open(file):
-    data = vaex.open(file)
+def vaex_open(file, **kwargs):
+    data = vaex.open(file, **kwargs)
     try:
         yield data
     finally:
@@ -75,6 +75,19 @@ def get_open_file_limit():
         return 100
 
 
+def try_groupby(df, *args, max_retries=10, **kwargs):
+    # Workaround for Vaex groupby randomly failing with an index error.
+    attempt = 1
+    while True:
+        try:
+            return df.groupby(*args, **kwargs)
+        except:
+            if attempt > max_retries:
+                raise
+            
+            attempt += 1
+
+
 def chunk(it, size):
     it = iter(it)
     return iter(lambda: tuple(islice(it, size)), ())
@@ -89,37 +102,25 @@ def merge_chunk(files, output_path, sum_cols):
         df.export(tmp_output)
     
     with vaex_open(tmp_output) as df:
-		attempt = 1
-        try:
-	        df = df.groupby(set(df.get_column_names()) - set(sum_cols),
-                            agg={c: "sum" for c in sum_cols},
-                            assume_sparse=True)
-    	except:
-			if attempt > 3:
-				raise
-				
-        	print(f"Aggregation error - retrying")
-			attempt += 1
-            
-        df.export(output_path)
+        try_groupby(df, set(df.get_column_names()) - set(sum_cols),
+                    agg={c: "sum" for c in sum_cols},
+                    assume_sparse=True).export(output_path)
         
     os.remove(tmp_output)
 
 
 def merge(pattern, output_path, *sum_cols, chunk_size):
     csv_files = glob(pattern)
-    converted_files = glob(f"{pattern}.parquet")
-    if not (csv_files or converted_files):
+    if not csv_files:
         return False
 
-    dtype = None
-    for csv_file in csv_files:
-		converted_file = f"{csv_file}.parquet"
-        if os.path.exists(converted_file):
-            continue
+    files_to_merge = []
 
+    dtype = None
+    for batch in chunk(csv_files, chunk_size):
+        batch = list(batch)
         if not dtype:
-            header = next(csv.reader(open(csv_file)))
+            header = next(csv.reader(open(batch[0])))
             dtype = {
                 c: np.int if c == "year"
                    else np.float32 if c in ("area", "flux_tc", "pool_tc")
@@ -127,11 +128,14 @@ def merge(pattern, output_path, *sum_cols, chunk_size):
                 for c in header
             }
         
-        vaex.from_csv(
-            csv_file, low_memory=False, dtype=dtype, keep_default_na=False
-        ).export(converted_file)
+        merged_output_file = f"_csv_{uuid.uuid1()}".join(os.path.splitext(output_path))
+        files_to_merge.append(merged_output_file)
+        with vaex_open(batch, low_memory=False, dtype=dtype, keep_default_na=False) as df:
+            try_groupby(df, set(df.get_column_names()) - set(sum_cols),
+                agg={c: "sum" for c in sum_cols},
+                assume_sparse=True
+            ).export(merged_output_file)
     
-    files_to_merge = glob(f"{pattern}.parquet")
     while len(files_to_merge) > chunk_size:
         merged_chunks = []
         for batch in chunk(files_to_merge, chunk_size):
@@ -147,11 +151,9 @@ def merge(pattern, output_path, *sum_cols, chunk_size):
             all_chunks.export(final_merged_file)
     
         with vaex_open(final_merged_file) as df:
-            df = df.groupby(set(df.get_column_names()) - set(sum_cols),
-                            agg={c: "sum" for c in sum_cols},
-                            assume_sparse=True)
-
-            df.export(output_path)
+            try_groupby(df, set(df.get_column_names()) - set(sum_cols),
+                        agg={c: "sum" for c in sum_cols},
+                        assume_sparse=True).export(output_path)
         try:
             os.remove(final_merged_file)
         except:
@@ -219,7 +221,8 @@ def compile_flux_indicators(merged_flux_data, indicators, output_db):
         if merged_flux_data.count(selection=True) == 0:
             continue
         
-        flux_data = merged_flux_data.groupby(
+        flux_data = try_groupby(
+            merged_flux_data,
             groupby_columns,
             agg={"flux_tc": vaex.agg.sum("flux_tc", selection=True)},
             assume_sparse=True)
