@@ -98,14 +98,13 @@ def merge_chunk(files, output_path, sum_cols):
         os.remove(output_path)
     
     tmp_output = "_tmp".join(os.path.splitext(output_path))
-    with vaex_open(files) as df:
-        df.export(tmp_output)
-    
+    vaex.open(files).export(tmp_output)
     with vaex_open(tmp_output) as df:
         try_groupby(df, set(df.get_column_names()) - set(sum_cols),
                     agg={c: "sum" for c in sum_cols},
                     assume_sparse=True).export(output_path)
-        
+    
+    del df
     os.remove(tmp_output)
 
 
@@ -135,6 +134,8 @@ def merge(pattern, output_path, *sum_cols, chunk_size):
                 agg={c: "sum" for c in sum_cols},
                 assume_sparse=True
             ).export(merged_output_file)
+            
+        del df
     
     while len(files_to_merge) > chunk_size:
         merged_chunks = []
@@ -147,13 +148,13 @@ def merge(pattern, output_path, *sum_cols, chunk_size):
     
     if len(files_to_merge) > 1:
         final_merged_file = "_merged".join(os.path.splitext(output_path))
-        with vaex_open(files_to_merge) as all_chunks:
-            all_chunks.export(final_merged_file)
-    
+        vaex.open(files_to_merge).export(final_merged_file)
         with vaex_open(final_merged_file) as df:
             try_groupby(df, set(df.get_column_names()) - set(sum_cols),
                         agg={c: "sum" for c in sum_cols},
                         assume_sparse=True).export(output_path)
+        
+        del df
         try:
             os.remove(final_merged_file)
         except:
@@ -402,12 +403,14 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
             return
         
         with vaex_open(age_output_file) as data:
+            base_columns = set(data.get_column_names()) - {"area"}
             vaex_to_table(data, output_db, "raw_ages",
                 Column("year", Integer),
                 Column("area", Numeric)
             )
 
-        base_columns = set(vaex.open(age_output_file).get_column_names()) - {"area"}
+        del data
+
         indicators = json.load(open(
             indicator_config_file
             or os.path.join(os.path.dirname(__file__), "compileresults.json")))
@@ -420,6 +423,8 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
                     Column("disturbance_code", Integer),
                     Column("area", Numeric)
                 )
+
+        del data
 
         flux_output_file = os.path.join(tmp, "flux.parquet")
         if merge(os.path.join(results_path, "flux_*.csv"), flux_output_file, "flux_tc", chunk_size=chunk_size):
@@ -435,6 +440,8 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
             compile_flux_indicator_aggregates(base_columns, indicators, output_db)
             compile_stock_change_indicators(base_columns, indicators, output_db)
 
+        del data
+
         pool_output_file = os.path.join(tmp, "pool.parquet")
         if merge(os.path.join(results_path, "pool_*.csv"), pool_output_file, "pool_tc", chunk_size=chunk_size):
             with vaex_open(pool_output_file) as data:
@@ -445,6 +452,8 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
             
             compile_pool_indicators(base_columns, indicators, output_db)
             
+        del data
+
         error_output_file = os.path.join(tmp, "error.parquet")
         if merge(os.path.join(results_path, "error_*.csv"), error_output_file, "area", chunk_size=chunk_size):
             with vaex_open(error_output_file) as data:
@@ -452,6 +461,8 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
                     Column("year", Integer),
                     Column("area", Numeric)
                 )
+
+        del data
 
     create_views(output_db)
 
