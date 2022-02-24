@@ -409,7 +409,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
                 Column("area", Numeric)
             )
 
-        del data
+        data = None
 
         indicators = json.load(open(
             indicator_config_file
@@ -424,7 +424,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
                     Column("area", Numeric)
                 )
 
-        del data
+        data = None
 
         flux_output_file = os.path.join(tmp, "flux.parquet")
         if merge(os.path.join(results_path, "flux_*.csv"), flux_output_file, "flux_tc", chunk_size=chunk_size):
@@ -440,7 +440,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
             compile_flux_indicator_aggregates(base_columns, indicators, output_db)
             compile_stock_change_indicators(base_columns, indicators, output_db)
 
-        del data
+        data = None
 
         pool_output_file = os.path.join(tmp, "pool.parquet")
         if merge(os.path.join(results_path, "pool_*.csv"), pool_output_file, "pool_tc", chunk_size=chunk_size):
@@ -452,7 +452,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
             
             compile_pool_indicators(base_columns, indicators, output_db)
             
-        del data
+        data = None
 
         error_output_file = os.path.join(tmp, "error.parquet")
         if merge(os.path.join(results_path, "error_*.csv"), error_output_file, "area", chunk_size=chunk_size):
@@ -462,7 +462,7 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
                     Column("area", Numeric)
                 )
 
-        del data
+        data = None
 
     create_views(output_db)
 
