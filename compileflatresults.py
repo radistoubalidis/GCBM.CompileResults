@@ -397,8 +397,10 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
         os.remove(output_db)
 
     with TemporaryDirectory(dir=output_dir) as tmp:
-        age_output_file = os.path.join(tmp, "age.parquet")
-        if not merge(os.path.join(results_path, "age_*.csv"), age_output_file, "area", chunk_size=chunk_size):
+        age_output_file = os.path.join(results_path, "age.parquet")
+        if (not os.path.exists(age_output_file)
+            and not merge(os.path.join(results_path, "age_*.csv"), age_output_file, "area", chunk_size=chunk_size)
+        ):
             logging.info(f"No results to process in {results_path}")
             return
         
@@ -415,8 +417,10 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
             indicator_config_file
             or os.path.join(os.path.dirname(__file__), "compileresults.json")))
         
-        dist_output_file = os.path.join(tmp, "disturbance.parquet")
-        if merge(os.path.join(results_path, "disturbance_*.csv"), dist_output_file, "area", chunk_size=chunk_size):
+        dist_output_file = os.path.join(results_path, "disturbance.parquet")
+        if (os.path.exists(dist_output_file)
+            or merge(os.path.join(results_path, "disturbance_*.csv"), dist_output_file, "area", chunk_size=chunk_size)
+        ):
             with vaex_open(dist_output_file) as data:
                 vaex_to_table(data, output_db, "raw_disturbances",
                     Column("year", Integer),
@@ -426,8 +430,10 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
 
         data = None
 
-        flux_output_file = os.path.join(tmp, "flux.parquet")
-        if merge(os.path.join(results_path, "flux_*.csv"), flux_output_file, "flux_tc", chunk_size=chunk_size):
+        flux_output_file = os.path.join(results_path, "flux.parquet")
+        if (os.path.exists(flux_output_file)
+            or merge(os.path.join(results_path, "flux_*.csv"), flux_output_file, "flux_tc", chunk_size=chunk_size)
+        ):
             with vaex_open(flux_output_file) as data:
                 vaex_to_table(data, output_db, "raw_fluxes",
                     Column("year", Integer),
@@ -442,8 +448,10 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
 
         data = None
 
-        pool_output_file = os.path.join(tmp, "pool.parquet")
-        if merge(os.path.join(results_path, "pool_*.csv"), pool_output_file, "pool_tc", chunk_size=chunk_size):
+        pool_output_file = os.path.join(results_path, "pool.parquet")
+        if (os.path.exists(pool_output_file)
+            or merge(os.path.join(results_path, "pool_*.csv"), pool_output_file, "pool_tc", chunk_size=chunk_size)
+        ):
             with vaex_open(pool_output_file) as data:
                 vaex_to_table(data, output_db, "raw_pools",
                     Column("year", Integer),
@@ -454,8 +462,10 @@ def compile_gcbm_output(results_path, output_db, indicator_config_file=None, chu
             
         data = None
 
-        error_output_file = os.path.join(tmp, "error.parquet")
-        if merge(os.path.join(results_path, "error_*.csv"), error_output_file, "area", chunk_size=chunk_size):
+        error_output_file = os.path.join(results_path, "error.parquet")
+        if (os.path.exists(error_output_file)
+            or merge(os.path.join(results_path, "error_*.csv"), error_output_file, "area", chunk_size=chunk_size)
+        ):
             with vaex_open(error_output_file) as data:
                 vaex_to_table(data, output_db, "raw_errors",
                     Column("year", Integer),
