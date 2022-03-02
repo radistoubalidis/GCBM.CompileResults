@@ -323,7 +323,7 @@ def create_views(output_db):
             conn.execute(text(sql))
 
 
-def compile_gcbm_output(title, conn_str, results_path, output_db, indicator_config_file=None, chunk_size=1000):
+def compile_gcbm_output(title, conn_str, results_path, output_db, indicator_config_file=None, chunk_size=1000, drop_schema=False):
     output_dir = os.path.dirname(output_db)
     os.makedirs(output_dir, exist_ok=True)
     
@@ -335,8 +335,10 @@ def compile_gcbm_output(title, conn_str, results_path, output_db, indicator_conf
     # Create the reporting tables in the simulation output schema.
     results_db_engine = create_engine(conn_str, server_side_cursors=True)
     with results_db_engine.connect() as conn:
-        conn.execute(text(f"DROP SCHEMA IF EXISTS {results_schema} CASCADE"))
-        conn.execute(text(f"CREATE SCHEMA {results_schema}"))
+        if drop_schema:
+            conn.execute(text(f"DROP SCHEMA IF EXISTS {results_schema} CASCADE"))
+        
+        conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {results_schema}"))
 
         if not merge("raw_ages", os.path.join(results_path, "age_*.csv"), conn, results_schema, "area", chunk_size=chunk_size):
             return
@@ -389,4 +391,4 @@ if __name__ == "__main__":
     parser.add_argument("--chunk_size",       help="number of CSV files to merge at a time", type=int, default=1000)
     args = parser.parse_args()
     
-    compile_gcbm_output(args.title, args.results_conn_str, args.results_path, args.output_db, args.indicator_config, args.chunk_size)
+    compile_gcbm_output(args.title, args.results_conn_str, args.results_path, args.output_db, args.indicator_config, args.chunk_size, True)
