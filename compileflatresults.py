@@ -160,7 +160,7 @@ def merge(pattern, output_path, *sum_cols, chunk_size):
         except:
             pass
     else:
-        os.rename(merged_chunks[0], output_path)
+        os.rename(files_to_merge[0], output_path)
     
     return True
 
