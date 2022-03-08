@@ -93,7 +93,7 @@ def merge(table, pattern, conn, schema, *sum_cols, chunk_size):
                 header = next(csv.reader(open(batch[0])))
                 dtypes = [
                     "INTEGER" if c in ("year", "disturbance_code")
-                    else "REAL" if c in ("area", "flux_tc", "pool_tc")
+                    else "NUMERIC" if c in ("area", "flux_tc", "pool_tc")
                     else "VARCHAR"
                     for c in header
                 ]
@@ -139,7 +139,7 @@ def compile_flux_indicators(conn, indicator_config, classifiers):
             f"""
             CREATE UNLOGGED TABLE IF NOT EXISTS v_flux_indicators (
                 indicator VARCHAR, year INTEGER, {classifiers_ddl} VARCHAR, unfccc_land_class VARCHAR,
-                age_range VARCHAR, disturbance_type VARCHAR, disturbance_code INTEGER, flux_tc REAL)
+                age_range VARCHAR, disturbance_type VARCHAR, disturbance_code INTEGER, flux_tc NUMERIC)
             """)
         
         for flux in flux_indicators:
@@ -178,7 +178,7 @@ def compile_flux_indicator_aggregates(conn, indicator_config, classifiers):
             f"""
             CREATE UNLOGGED TABLE IF NOT EXISTS v_flux_indicator_aggregates (
                 indicator VARCHAR, year INTEGER, {classifiers_ddl} VARCHAR,
-                unfccc_land_class VARCHAR, age_range VARCHAR, flux_tc REAL)
+                unfccc_land_class VARCHAR, age_range VARCHAR, flux_tc NUMERIC)
             """))
         
         for name, flux_indicators in indicator_config["flux_collections"].items():
@@ -205,7 +205,7 @@ def compile_stock_change_indicators(conn, indicator_config, classifiers):
             f"""
             CREATE UNLOGGED TABLE IF NOT EXISTS v_stock_change_indicators (
                 indicator VARCHAR, year INTEGER, {classifiers_ddl} VARCHAR,
-                unfccc_land_class VARCHAR, age_range VARCHAR, flux_tc REAL)
+                unfccc_land_class VARCHAR, age_range VARCHAR, flux_tc NUMERIC)
             """))
 
         for name, components in indicator_config["stock_changes"].items():
@@ -244,7 +244,7 @@ def compile_pool_indicators(conn, indicator_config, classifiers):
             f"""
             CREATE UNLOGGED TABLE IF NOT EXISTS v_pool_indicators (
                 indicator VARCHAR, year INTEGER, {classifiers_ddl} VARCHAR,
-                unfccc_land_class VARCHAR, age_range VARCHAR, pool_tc REAL)
+                unfccc_land_class VARCHAR, age_range VARCHAR, pool_tc NUMERIC)
             """))
         
         for name, pool_collection in indicator_config["pool_indicators"].items():
