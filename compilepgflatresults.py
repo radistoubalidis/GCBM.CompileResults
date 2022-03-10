@@ -140,12 +140,13 @@ def merge(table, pattern, conn, schema, *sum_cols, chunk_size):
     return True
 
 
-def compile_flux_indicators(conn, indicator_config, classifiers):
+def compile_flux_indicators(conn, schema, indicator_config, classifiers):
     flux_indicators = read_flux_indicators(indicator_config)
     classifiers_ddl = " VARCHAR, ".join(classifiers)
     classifiers_select = ",".join(classifiers)
 
     with conn.begin():
+        conn.execute(text(f"SET SEARCH_PATH={schema}"))
         conn.execute(
             f"""
             CREATE UNLOGGED TABLE IF NOT EXISTS v_flux_indicators (
@@ -180,11 +181,12 @@ def compile_flux_indicators(conn, indicator_config, classifiers):
             conn.execute(text(sql), name=flux.name, from_pools=flux.from_pools, to_pools=flux.to_pools)
         
 
-def compile_flux_indicator_aggregates(conn, indicator_config, classifiers):
+def compile_flux_indicator_aggregates(conn, schema, indicator_config, classifiers):
     classifiers_ddl = " VARCHAR, ".join(classifiers)
     classifiers_select = ",".join(classifiers)
 
     with conn.begin():
+        conn.execute(text(f"SET SEARCH_PATH={schema}"))
         conn.execute(text(
             f"""
             CREATE UNLOGGED TABLE IF NOT EXISTS v_flux_indicator_aggregates (
@@ -207,11 +209,12 @@ def compile_flux_indicator_aggregates(conn, indicator_config, classifiers):
                 """), name=name, flux_indicators=tuple(flux_indicators))
 
 
-def compile_stock_change_indicators(conn, indicator_config, classifiers):
+def compile_stock_change_indicators(conn, schema, indicator_config, classifiers):
     classifiers_ddl = " VARCHAR, ".join(classifiers)
     classifiers_select = ",".join(classifiers)
 
     with conn.begin():
+        conn.execute(text(f"SET SEARCH_PATH={schema}"))
         conn.execute(text(
             f"""
             CREATE UNLOGGED TABLE IF NOT EXISTS v_stock_change_indicators (
@@ -246,11 +249,12 @@ def compile_stock_change_indicators(conn, indicator_config, classifiers):
                 """), **query_params)
 
 
-def compile_pool_indicators(conn, indicator_config, classifiers):
+def compile_pool_indicators(conn, schema, indicator_config, classifiers):
     classifiers_ddl = " VARCHAR, ".join(classifiers)
     classifiers_select = ",".join(classifiers)
 
     with conn.begin():
+        conn.execute(text(f"SET SEARCH_PATH={schema}"))
         conn.execute(text(
             f"""
             CREATE UNLOGGED TABLE IF NOT EXISTS v_pool_indicators (
@@ -352,6 +356,7 @@ def compile_gcbm_output(title, conn_str, results_path, output_db, indicator_conf
             conn.execute(text(f"DROP SCHEMA IF EXISTS {results_schema} CASCADE"))
         
         conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {results_schema}"))
+        conn.execute(text(f"SET SEARCH_PATH={results_schema}"))
 
         if (not table_exists(conn, results_schema, "raw_ages")
             and not merge("raw_ages", os.path.join(results_path, "age_*.csv"), conn,
@@ -376,15 +381,15 @@ def compile_gcbm_output(title, conn_str, results_path, output_db, indicator_conf
             or merge("raw_fluxes", os.path.join(results_path, "flux_*.csv"), conn,
                      results_schema, "flux_tc", chunk_size=chunk_size)
         ):
-            compile_flux_indicators(conn, indicators, classifiers)
-            compile_flux_indicator_aggregates(conn, indicators, classifiers)
-            compile_stock_change_indicators(conn, indicators, classifiers)
+            compile_flux_indicators(conn, results_schema, indicators, classifiers)
+            compile_flux_indicator_aggregates(conn, results_schema, indicators, classifiers)
+            compile_stock_change_indicators(conn, results_schema, indicators, classifiers)
 
         if (table_exists(conn, results_schema, "raw_pools")
             or merge("raw_pools", os.path.join(results_path, "pool_*.csv"), conn,
                      results_schema, "pool_tc", chunk_size=chunk_size)
         ):
-            compile_pool_indicators(conn, indicators, classifiers)
+            compile_pool_indicators(conn, results_schema, indicators, classifiers)
 
         if not table_exists(conn, results_schema, "raw_errors"):
             merge("raw_errors", os.path.join(results_path, "error_*.csv"), conn,
