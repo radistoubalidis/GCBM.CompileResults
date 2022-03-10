@@ -38,6 +38,17 @@ class FluxIndicator:
         self.flux_source = flux_source
 
 
+def table_exists(conn, schema, table):
+    return conn.execute(text(
+        """
+        SELECT EXISTS (
+            SELECT FROM pg_tables
+            WHERE schemaname = :schema
+                AND tablename  = :table
+        )
+        """), schema=schema, table=table).fetchone()[0]
+
+
 def copy_reporting_tables(from_conn, from_schema, to_conn, to_schema=None):
     md = MetaData()
     md.reflect(bind=from_conn, schema=from_schema)
@@ -323,7 +334,9 @@ def create_views(output_db):
             conn.execute(text(sql))
 
 
-def compile_gcbm_output(title, conn_str, results_path, output_db, indicator_config_file=None, chunk_size=1000, drop_schema=False):
+def compile_gcbm_output(title, conn_str, results_path, output_db, indicator_config_file=None,
+                        chunk_size=1000, drop_schema=False):
+    
     output_dir = os.path.dirname(output_db)
     os.makedirs(output_dir, exist_ok=True)
     
@@ -340,7 +353,10 @@ def compile_gcbm_output(title, conn_str, results_path, output_db, indicator_conf
         
         conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {results_schema}"))
 
-        if not merge("raw_ages", os.path.join(results_path, "age_*.csv"), conn, results_schema, "area", chunk_size=chunk_size):
+        if (not table_exists(conn, results_schema, "raw_ages")
+            and not merge("raw_ages", os.path.join(results_path, "age_*.csv"), conn,
+                          results_schema, "area", chunk_size=chunk_size)
+        ):
             return
         
         classifier_names = {col for col in conn.execute(text("SELECT * FROM raw_ages LIMIT 1")).keys()} \
@@ -352,17 +368,27 @@ def compile_gcbm_output(title, conn_str, results_path, output_db, indicator_conf
             indicator_config_file
             or os.path.join(os.path.dirname(__file__), "compileresults.json")))
         
-        merge("raw_disturbances", os.path.join(results_path, "disturbance_*.csv"), conn, results_schema, "area", chunk_size=chunk_size)
+        if not table_exists(conn, results_schema, "raw_disturbances"):
+            merge("raw_disturbances", os.path.join(results_path, "disturbance_*.csv"),
+                  conn, results_schema, "area", chunk_size=chunk_size)
 
-        if merge("raw_fluxes", os.path.join(results_path, "flux_*.csv"), conn, results_schema, "flux_tc", chunk_size=chunk_size):
+        if (table_exists(conn, results_schema, "raw_fluxes")
+            or merge("raw_fluxes", os.path.join(results_path, "flux_*.csv"), conn,
+                     results_schema, "flux_tc", chunk_size=chunk_size)
+        ):
             compile_flux_indicators(conn, indicators, classifiers)
             compile_flux_indicator_aggregates(conn, indicators, classifiers)
             compile_stock_change_indicators(conn, indicators, classifiers)
 
-        if merge("raw_pools", os.path.join(results_path, "pool_*.csv"), conn, results_schema, "pool_tc", chunk_size=chunk_size):
+        if (table_exists(conn, results_schema, "raw_pools")
+            or merge("raw_pools", os.path.join(results_path, "pool_*.csv"), conn,
+                     results_schema, "pool_tc", chunk_size=chunk_size)
+        ):
             compile_pool_indicators(conn, indicators, classifiers)
 
-        merge("raw_errors", os.path.join(results_path, "error_*.csv"), conn, results_schema, "area", chunk_size=chunk_size)
+        if not table_exists(conn, results_schema, "raw_errors"):
+            merge("raw_errors", os.path.join(results_path, "error_*.csv"), conn,
+                  results_schema, "area", chunk_size=chunk_size)
 
         # Export the reporting tables to SQLite.
         output_db_engine = create_engine("sqlite:///{}".format(output_db))
