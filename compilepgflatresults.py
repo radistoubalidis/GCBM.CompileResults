@@ -4,6 +4,7 @@ import uuid
 import json
 import os
 import sys
+import pandas as pd
 from sqlalchemy.exc import SQLAlchemyError
 from itertools import islice
 from contextlib import contextmanager
@@ -50,26 +51,19 @@ def table_exists(conn, schema, table):
 
 
 def copy_reporting_tables(from_conn, from_schema, to_conn, to_schema=None):
+    for sql in (
+        "PRAGMA main.page_size=4096;",
+        "PRAGMA main.cache_size=250000;",
+        "PRAGMA synchronous=OFF"
+    ):
+        to_conn.execute(sql)
+    
     md = MetaData()
     md.reflect(bind=from_conn, schema=from_schema)
-    output_md = MetaData(bind=to_conn, schema=to_schema)
     with to_conn.begin():
         for fqn, table in md.tables.items():
-            table.tometadata(output_md, schema=None)
-            
-            output_table = Table(table.name, output_md)
-            output_table.drop(checkfirst=True)
-            output_table.create()
-            
-            batch = []
-            for i, row in enumerate(from_conn.execute(select([table]))):
-                batch.append({k: v for k, v in row.items()})
-                if i % 10000 == 0:
-                    to_conn.execute(insert(output_table), batch)
-                    batch = []
-            
-            if batch:
-                to_conn.execute(insert(output_table), batch)
+            for pg_data in pd.read_sql_table(table.name, from_conn, from_schema, chunksize=10000):
+                pg_data.to_sql(table.name, to_conn, if_exists="append")
         
 
 def read_flux_indicators(indicator_config):
@@ -350,8 +344,10 @@ def compile_gcbm_output(title, conn_str, results_path, output_db, indicator_conf
     results_schema = title.lower()
     
     # Create the reporting tables in the simulation output schema.
-    results_db_engine = create_engine(conn_str, server_side_cursors=True)
+    results_db_engine = create_engine(conn_str)
     with results_db_engine.connect() as conn:
+        conn = conn.execution_options(stream_results=True, max_row_buffer=100000)
+
         if drop_schema:
             conn.execute(text(f"DROP SCHEMA IF EXISTS {results_schema} CASCADE"))
         
