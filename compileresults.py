@@ -21,7 +21,7 @@ def load_sql(name, db_type, classifiers, batch=None):
     of 00_setup.sql for Postgres databases), and adds the simulation classifier columns in one of
     several different formats for queries that need them.
     '''
-    logging.info(f"  {name}")
+    logging.info(f"  :{name}")
     sql_dir = os.path.join(os.path.dirname(__file__), "sql")
     for filename in (os.path.join(sql_dir, f"{name}_{db_type}.sql"),
                      os.path.join(sql_dir, f"{name}.sql")):
